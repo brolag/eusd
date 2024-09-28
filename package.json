@@ -34,15 +34,11 @@
     "verify": "yarn workspace @se-2/foundry verify"
   },
   "devDependencies": {
-    "@types/d3": "^7",
     "husky": "~8.0.3",
     "lint-staged": "~13.2.2"
   },
   "packageManager": "yarn@3.2.3",
   "engines": {
     "node": ">=18.17.0"
-  },
-  "dependencies": {
-    "d3": "^7.9.0"
   }
 }

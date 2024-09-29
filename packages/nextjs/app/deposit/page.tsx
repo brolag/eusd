@@ -5,15 +5,33 @@ import Link from "next/link";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useBalance } from "wagmi";
 import { ArrowLeftIcon } from "@heroicons/react/24/outline";
+import { parseEther } from "viem";
+import { useScaffoldWriteContract } from "~~/hooks/scaffold-eth";
 
 const Deposit = () => {
   const { address: connectedAddress, isConnected } = useAccount();
   const { data: ethBalance } = useBalance({ address: connectedAddress });
   const [depositAmount, setDepositAmount] = useState("");
 
-  const handleDeposit = () => {
-    // Implement deposit logic here
+  const { writeContractAsync: writeYourContractAsync } = useScaffoldWriteContract("EncodeStableCoin");
+
+
+
+  const handleDepositETH = async() => {
     console.log(`Depositing ${depositAmount} ETH`);
+    try {
+      const tx = await writeYourContractAsync({
+        functionName: "addCollateral",
+        value: parseEther(depositAmount),
+      });
+
+      if (tx) {
+        console.log("Transaction sent:", tx);
+      } 
+
+    } catch (error) {
+      console.error(error);
+    }
   };
 
   return (
@@ -45,7 +63,7 @@ const Deposit = () => {
             </div>
           </div>
           <button
-            onClick={handleDeposit}
+            onClick={handleDepositETH}
             className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded"
             type="button"
           >

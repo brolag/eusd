@@ -5,14 +5,30 @@ import Link from "next/link";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useBalance } from "wagmi";
 import { ArrowLeftIcon } from "@heroicons/react/24/outline";
+import { useScaffoldWriteContract } from "~~/hooks/scaffold-eth";
+import { parseEther } from "viem";
 
 const BurnEUSD = () => {
   const { address: connectedAddress, isConnected } = useAccount();
   const { data: eusdBalance } = useBalance({ address: connectedAddress, token: "0xYourEUSDTokenAddress" });
   const [burnAmount, setBurnAmount] = useState("");
 
-  const handleBurn = () => {
+  const { writeContractAsync: writeYourContractAsync } = useScaffoldWriteContract("EncodeStableCoin");
+
+
+  const handleBurn = async() => {
     console.log(`Burning ${burnAmount} EUSD`);
+
+    try {
+      const tx = await writeYourContractAsync({
+        functionName: "burn",
+        args: [parseEther(burnAmount)],
+      });
+
+      console.log("Transaction sent:", tx);
+    } catch (error) {
+      console.error(error);
+    }
   };
 
   return (

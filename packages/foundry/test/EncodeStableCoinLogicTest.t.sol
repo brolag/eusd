@@ -48,6 +48,26 @@ contract EncodeStableCoinLogicTest is DSTest {
 
     // Step 5: Assert that the fetched price matches the mock price
     assertEq(fetchedPrice, mockETHPrice, "The fetched ETH price should match the mock price");
-}
+    }
 
+    /**
+    * @notice Test that getETHUSDPrice reverts if the data from Tellor is stale.
+    */
+    function testStaleETHUSDPrice() public {
+    // Step 1: Define the queryId for the ETH/USD price request
+    bytes32 queryId = keccak256(abi.encode("SpotPrice", abi.encode("eth", "usd")));
+
+    // Step 2: Set a mock ETH price (e.g., 3000 USD per ETH)
+    uint256 mockETHPrice = 3000 * 1e18;
+
+    // Step 3: Submit the mock ETH price with the current timestamp
+    tellorPlayground.submitValue(queryId, abi.encode(mockETHPrice), 0, abi.encode("eth", "usd"));
+
+    // Step 4: Manipulate time to simulate stale data (warp time by 2 days)
+    vm.warp(block.timestamp + 2 days);
+
+    // Step 5: Expect the contract to revert due to stale data
+    vm.expectRevert("Data is stale");
+    stableCoinLogic.getETHUSDPrice();
+    }
 }

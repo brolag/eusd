@@ -29,4 +29,25 @@ contract EncodeStableCoinLogicTest is DSTest {
         // Deploy EncodeStableCoinLogic with Tellor Playground address
         stableCoinLogic = new EncodeStableCoinLogic(address(stableCoin), payable(address(tellorPlayground)));
     }
+
+    /**
+    * @notice Test that the getETHUSDPrice function returns the correct price from Tellor Oracle.
+    */
+    function testGetETHUSDPrice() public {
+    // Step 1: Define the queryId for the ETH/USD price request
+    bytes32 queryId = keccak256(abi.encode("SpotPrice", abi.encode("eth", "usd")));
+    
+    // Step 2: Set a mock ETH price (e.g., 3000 USD per ETH)
+    uint256 mockETHPrice = 3000 * 1e18;  // Mock price in wei
+
+    // Step 3: Submit the mock ETH price to the Tellor Playground
+    tellorPlayground.submitValue(queryId, abi.encode(mockETHPrice), 0, abi.encode("eth", "usd"));
+
+    // Step 4: Call the getETHUSDPrice function from EncodeStableCoinLogic
+    uint256 fetchedPrice = stableCoinLogic.getETHUSDPrice();
+
+    // Step 5: Assert that the fetched price matches the mock price
+    assertEq(fetchedPrice, mockETHPrice, "The fetched ETH price should match the mock price");
+}
+
 }

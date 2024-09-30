@@ -1,2 +1,4 @@
 @openzeppelin/contracts/=lib/openzeppelin-contracts/contracts
 usingtellor/=lib/usingtellor/
+forge-std/=lib/forge-std/src/
+ds-test/=lib/ds-test/src/

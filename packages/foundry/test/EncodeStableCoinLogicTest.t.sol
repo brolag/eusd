@@ -70,4 +70,18 @@ contract EncodeStableCoinLogicTest is DSTest {
     vm.expectRevert("Data is stale");
     stableCoinLogic.getETHUSDPrice();
     }
+
+    /**
+    * @notice Test that getETHUSDPrice reverts when no data is available from Tellor Oracle.
+    */
+    function testNoDataAvailable() public {
+    // Step 1: Define the queryId for the ETH/USD price request
+    bytes32 queryId = keccak256(abi.encode("SpotPrice", abi.encode("eth", "usd")));
+
+    // Step 2: Ensure that no data is available in Tellor Playground
+
+    // Step 3: Expect the contract to revert due to no data available
+    vm.expectRevert("No data available");
+    stableCoinLogic.getETHUSDPrice();
+    }
 }

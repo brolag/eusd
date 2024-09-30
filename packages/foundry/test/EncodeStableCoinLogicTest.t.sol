@@ -84,4 +84,32 @@ contract EncodeStableCoinLogicTest is DSTest {
     vm.expectRevert("No data available");
     stableCoinLogic.getETHUSDPrice();
     }
+
+    /**
+    * @notice Test that minting EUSD works as expected through the EncodeStableCoinLogic contract.
+    */
+    function testMintEUSD() public {
+    // Step 1: Call the mintEUSD function
+    uint256 mintAmount = 1000 * 1e18;
+    stableCoinLogic.mintEUSD(address(this), mintAmount);
+
+    // Step 2: Assert the minting was successful and balance was updated
+    assertEq(stableCoin.balanceOf(address(this)), mintAmount, "Minted balance should be updated correctly");
+    }
+
+    /**
+    * @notice Test that burning EUSD works as expected through the EncodeStableCoinLogic contract.
+    */
+    function testBurnEUSD() public {
+    // Step 1: Mint some EUSD to burn
+    uint256 mintAmount = 1000 * 1e18;
+    stableCoinLogic.mintEUSD(address(this), mintAmount);
+
+    // Step 2: Call the burnEUSD function to burn some amount
+    uint256 burnAmount = 500 * 1e18;
+    stableCoinLogic.burnEUSD(burnAmount);
+
+    // Step 3: Assert the burning was successful and balance was updated
+    assertEq(stableCoin.balanceOf(address(this)), mintAmount - burnAmount, "Burned balance should be updated correctly");
+    }
 }

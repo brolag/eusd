@@ -4,6 +4,8 @@ pragma solidity 0.8.27;
 
 //Import the stablecoin contract
 import { EncodeStableCoin } from "./EncodeStableCoin.sol";
+//Import the Tellor contract
+import { UsingTellor } from "usingtellor/contracts/UsingTellor.sol";
 
 /**
  * @title EncodeStableCoinLogic
@@ -19,10 +21,15 @@ contract EncodeStableCoinLogic {
     mapping(address => uint256) private stableCoinMinted; // Tracks the amount of EUSD minted per user
 
     /**
-     * @dev Constructor to initialize the EncodeStableCoin contract.
+     * @dev Constructor to initialize the EncodeStableCoin contract and Tellor oracle.
      * @param _stableCoin The address of the EncodeStableCoin contract.
+     * @param _tellorAddress The address of the Tellor oracle contract.
+     * 
+     * This constructor initializes the EncodeStableCoinLogic contract by setting the EncodeStableCoin reference
+     * and passing the Tellor oracle address to the inherited UsingTellor contract. The Tellor oracle is used to fetch
+     * external price data, specifically the ETH/USD price.
      */
-    constructor(address _stableCoin) {
+    constructor(address _stableCoin, address payable _tellorAddress) UsingTellor(_tellorAddress) {
     stableCoin = EncodeStableCoin(_stableCoin); // Initialize stablecoin reference
     }
 
@@ -70,7 +77,20 @@ contract EncodeStableCoinLogic {
     function liquidationStatus() public view returns (bool status) {
     }
 
+/**
+     * @notice Fetch ETH/USD price using Tellor Oracle
+     * @return price The ETH/USD price
+     */
     function getETHUSDPrice() public view returns (uint256 price) {
+        bytes memory _queryData = abi.encode("SpotPrice", abi.encode("eth", "usd"));
+        bytes32 _queryId = keccak256(_queryData);
+        (bytes memory _value, uint256 _timestamp) = _getDataBefore(_queryId, block.timestamp - 1 hours);
+
+        require(_timestamp > 0, "No data available");
+        require(block.timestamp - _timestamp < 1 days, "Data is stale");
+
+        price = abi.decode(_value, (uint256));
+        return price;
     }
 
     function _convertToETH(uint256 _amount) internal returns (uint256 ethAmount) {

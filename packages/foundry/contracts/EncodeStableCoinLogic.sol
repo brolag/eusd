@@ -6,13 +6,13 @@ import {EncodeStableCoin} from "./EncodeStableCoin.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {UsingTellor} from "usingtellor/contracts/UsingTellor.sol";
 
 /**
  * @title EncodeStableCoinLogic
  * @notice This contract handles the minting, burning, collateral management, and liquidation logic for the EncodeStableCoin (EUSD).
  */
-contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
-
+contract EncodeStableCoinLogic is Ownable, ReentrancyGuard, UsingTellor {
     //////////////// Errors \\\\\\\\\\\\\\\\
 
     error AmountMustBeMoreThanZero();
@@ -20,6 +20,8 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
     error HealthFactorIsNotOk(address user);
     error LiquidationStatusIsOk();
     error AmountToCoverIsMoreThanTheDebt();
+    error Teller_NoDataAvailable();
+    error Teller_DataIsStale();
 
     //////////////// Types \\\\\\\\\\\\\\\\
 
@@ -37,7 +39,7 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
 
     EncodeStableCoin private immutable i_eUSD; // Reference to the EncodeStableCoin contract
     IERC20 private immutable i_collateralToken; // Reference to the collateral token
-    address private immutable i_priceFeedAddress; // Reference to the price feed contract
+    address private immutable i_oracleAddress; // Reference to the Tellor Oracle contract
 
     uint256 private collectedFees; // Tracks the amount of fees collected
     uint256 private totalUsersCollateral; // Tracks the total amount of collateral deposited
@@ -52,6 +54,8 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
     event CollateralDeposited(address indexed user, uint256 indexed amount);
     event CollateralRedeemed(address indexed user, uint256 indexed amount);
     event UserLiquidated(address indexed user, uint256 indexed amount);
+    event FeesWithdrawn(address indexed to, uint256 feesToWithdrawn);
+    event ExtraCollateralWithdrawn(address indexed to, uint256 indexed amountWithdrawn);
 
     //////////////// Modifiers \\\\\\\\\\\\\\\\
 
@@ -60,20 +64,25 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
         _;
     }
 
+    modifier notZeroAddress(address _address) {
+        if (_address == address(0)) revert ZeroAddress();
+        _;
+    }
     //////////////// Functions \\\\\\\\\\\\\\\\
 
     /**
      * @dev Constructor to initialize the EncodeStableCoin contract.
      * @param eUSDAddress The address of the EncodeStableCoin contract.
      * @param collateralTokenAddress The address of the collateral token.
-     * @param priceFeedAddress The address of the price feed contract.
+     * @param oracleAddress The address of the Teller contract.
      */
-    constructor(address eUSDAddress, address collateralTokenAddress, address priceFeedAddress)
+    constructor(address eUSDAddress, address collateralTokenAddress, address payable oracleAddress)
         Ownable(msg.sender)
+        UsingTellor(oracleAddress)
     {
         i_eUSD = EncodeStableCoin(eUSDAddress);
         i_collateralToken = IERC20(collateralTokenAddress);
-        i_priceFeedAddress = priceFeedAddress;
+        i_oracleAddress = oracleAddress;
     }
 
     //////////////// External Functions \\\\\\\\\\\\\\\\
@@ -172,56 +181,111 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
         emit CollateralDeposited(msg.sender, amountWithBonus);
         emit UserLiquidated(user, amountToCover);
     }
+    /**
+     * @notice Withdraw collected fees to a specified address.
+     * @dev Only the owner can call this function.
+     * @param to The address to send the fees to.
+     * Emits a {FeesWithdrawn} event.
+     */
 
-    function withdrawFees(address to) external onlyOwner {
-        i_collateralToken.safeTransfer(to, collectedFees);
+    function withdrawFees(address to) external onlyOwner nonReentrant notZeroAddress(to) {
+        uint256 feesToWithdraw = collectedFees;
         collectedFees = 0;
+        i_collateralToken.safeTransfer(to, feesToWithdraw);
+        emit FeesWithdrawn(to, feesToWithdraw);
     }
 
-    function withdrawExtraCollateral(address to) external onlyOwner {
-        uint256 amount = i_collateralToken.balanceOf(address(this)) - totalUsersCollateral;
-        i_collateralToken.safeTransfer(to, amount);
+    /**
+     * @notice Withdraw extra collateral to a specified address.
+     * @dev Only the owner can call this function.
+     * @param to The address to send the extra collateral to.
+     * Emits an {ExtraCollateralWithdrawn} event.
+     */
+    function withdrawExtraCollateral(address to) external onlyOwner nonReentrant notZeroAddress(to) {
+        uint256 extraCollateral = i_collateralToken.balanceOf(address(this)) - totalUsersCollateral;
+        i_collateralToken.safeTransfer(to, extraCollateral);
+        emit ExtraCollateralWithdrawn(to, extraCollateral);
     }
 
     //////////////// Internal View Functions \\\\\\\\\\\\\\\\
-    
+
     function _checkHealthFactor(address user) internal view returns (bool healthFactor) {
         healthFactor = healthFactorOfUser(user) >= MIN_HEALTH_FACTOR;
     }
 
     function _convertToCollateralToken(uint256 amount) internal view returns (uint256 ethAmount) {
         uint256 ethPrice = getCollateralUSDPrice();
-        ethAmount = amount / ethPrice;
+        ethAmount = (amount * PRECISION) / ethPrice;
     }
 
     function _convertToUSD(uint256 amount) internal view returns (uint256 usdAmount) {
         uint256 ethPrice = getCollateralUSDPrice();
-        usdAmount = amount * ethPrice;
+        usdAmount = (amount * ethPrice) / PRECISION;
     }
-
     //////////////// Public and External View Functions \\\\\\\\\\\\\\\\
 
-    function liquidationStatus(address user) public view returns (uint256 healthFactor) {
+    /**
+     * @notice Get the liquidation status (health factor) of a user.
+     * @dev Calculates the user's liquidation health factor based on their collateral and debt.
+     * @param user The address of the user.
+     * @return liquidationHealthFactor The current liquidation health factor of the user.
+     */
+    function liquidationStatus(address user) public view returns (uint256 liquidationHealthFactor) {
         uint256 collateralInUSD = _convertToUSD(collateralDeposited[user]);
         uint256 eUSDUserBalance = eUSDMinted[user];
-        healthFactor = (collateralInUSD * PRECISION) / (eUSDUserBalance * LIQUIDATION_THRESHOLD);
+        liquidationHealthFactor = (collateralInUSD * PRECISION) / (eUSDUserBalance * LIQUIDATION_THRESHOLD);
     }
 
+    /**
+     * @notice Get the health factor of a user, used to determine if they can mint EUSD or redeem collateral.
+     * @dev Calculates the health factor based on the user's collateral and minted EUSD.
+     * @param user The address of the user.
+     * @return healthFactor The current health factor of the user.
+     */
     function healthFactorOfUser(address user) public view returns (uint256 healthFactor) {
         uint256 collateralUserBalanceInUsd = _convertToUSD(collateralDeposited[user]);
         uint256 eUSDUserBalance = eUSDMinted[user];
         healthFactor = (collateralUserBalanceInUsd * PRECISION) / (eUSDUserBalance * COLLATERALIZATION_RATIO);
     }
 
+    /**
+     * @notice Fetches the current collateral(ETH) to USD price from the Tellor Oracle.
+     * @dev Queries the Tellor Oracle using the encoded query data for ETH to USD spot price.
+     *      Ensures the data is not stale (within 1 day) and available (timestamp greater than 0).
+     * @return price The current collateral(ETH) price in USD.
+     */
     function getCollateralUSDPrice() public view returns (uint256 price) {
-        // here must be fetched information from Teller
+        bytes memory _queryData = abi.encode("SpotPrice", abi.encode("eth", "usd"));
+        bytes32 _queryId = keccak256(_queryData);
+        (bytes memory _value, uint256 _timestamp) = getDataBefore(_queryId, block.timestamp - 1 hours);
+
+        require(_timestamp > 0, Teller_NoDataAvailable());
+        require(block.timestamp - _timestamp < 1 days, Teller_DataIsStale());
+
+        price = abi.decode(_value, (uint256));
     }
 
+    /**
+     * @notice Get the amount of EUSD required to improve the liquidation status of a user.
+     * @dev Calculates the difference between the user's current EUSD balance and the required balance for improved liquidation status.
+     * @param user The address of the user.
+     * @return difference The amount of EUSD required to improve the liquidation status.
+     */
     function getEUSDAmountToImproveLiquidationStatus(address user) public view returns (uint256 difference) {
         uint256 collateralInUSD = _convertToUSD(collateralDeposited[user]);
         uint256 eUSDUserBalance = eUSDMinted[user];
         uint256 eUSDUserBalanceMustHave = (collateralInUSD * PRECISION_FOR_DEBT_CALCULATIONS) / LIQUIDATION_THRESHOLD;
         difference = eUSDUserBalanceMustHave - eUSDUserBalance;
+    }
+
+    /**
+     * @notice Get the total collateralization ratio for the stablecoin system.
+     * @dev Calculates the overall collateralization ratio based on the total collateral and minted EUSD.
+     *      Precision is used to return the value as a percentage.
+     * @return The total collateralization ratio in percentage.
+     */
+    function getEUSDTotalCollateralization() external view returns (uint256) {
+        return (_convertToUSD(totalUsersCollateral) * PRECISION) / (totalEUSDMinted * PRECISION_FOR_DEBT_CALCULATIONS);
     }
 
     function getCollaterizationRatio() external pure returns (uint256) {
@@ -252,8 +316,8 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
         return address(i_collateralToken);
     }
 
-    function getPriceFeedAddress() external view returns (address) {
-        return i_priceFeedAddress;
+    function getOracleAddress() external view returns (address) {
+        return i_oracleAddress;
     }
 
     function getTotalUsersCollateral() external view returns (uint256) {
@@ -262,10 +326,5 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
 
     function getTotalEUSDMinted() external view returns (uint256) {
         return totalEUSDMinted;
-    }
-
-    function getEUSDTotalCollateralization() external view returns (uint256) {
-        // used precisions to return the value in percentage
-        return (_convertToUSD(totalUsersCollateral) * PRECISION) / (totalEUSDMinted * PRECISION_FOR_DEBT_CALCULATIONS);
     }
 }

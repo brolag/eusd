@@ -38,6 +38,7 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
     EncodeStableCoin private immutable i_eUSD; // Reference to the EncodeStableCoin contract
     IERC20 private immutable i_collateralToken; // Reference to the collateral token
     address private immutable i_priceFeedAddress; // Reference to the price feed contract
+
     uint256 private collectedFees; // Tracks the amount of fees collected
     uint256 private totalUsersCollateral; // Tracks the total amount of collateral deposited
     uint256 private totalEUSDMinted; // Tracks the total amount of EUSD minted
@@ -189,12 +190,12 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
     }
 
     function _convertToCollateralToken(uint256 amount) internal view returns (uint256 ethAmount) {
-        uint256 ethPrice = getCollateralUSDPrice( amount);
+        uint256 ethPrice = getCollateralUSDPrice();
         ethAmount = amount / ethPrice;
     }
 
     function _convertToUSD(uint256 amount) internal view returns (uint256 usdAmount) {
-        uint256 ethPrice = getCollateralUSDPrice( amount);
+        uint256 ethPrice = getCollateralUSDPrice();
         usdAmount = amount * ethPrice;
     }
 
@@ -212,7 +213,7 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
         healthFactor = (collateralUserBalanceInUsd * PRECISION) / (eUSDUserBalance * COLLATERALIZATION_RATIO);
     }
 
-    function getCollateralUSDPrice(uint256 amount) public view returns (uint256 price) {
+    function getCollateralUSDPrice() public view returns (uint256 price) {
         // here must be fetched information from Teller
     }
 

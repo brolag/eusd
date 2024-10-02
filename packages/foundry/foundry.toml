@@ -3,7 +3,7 @@ src = 'contracts'
 out = 'out'
 libs = ['lib']
 fs_permissions = [{ access = "read-write", path = "./"}]
-remappings = ['@openzeppelin/contracts=lib/openzeppelin-contracts/contracts']
+remappings = ['@openzeppelin/contracts=lib/openzeppelin-contracts/contracts', 'usingtellor/contracts/=lib/usingtellor/contracts']
 
 [rpc_endpoints]
 default_network = "http://127.0.0.1:8545"

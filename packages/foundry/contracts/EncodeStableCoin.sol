@@ -2,18 +2,18 @@
 
 pragma solidity 0.8.27;
 
-import {ERC20Burnable, ERC20} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-contract EncodeStableCoin is ERC20Burnable, Ownable {
+contract EncodeStableCoin is ERC20, Ownable {
+    constructor() ERC20("EncodeStableCoin", "EUSD") Ownable(msg.sender) {}
+    //after deploying the contracts, the ownership must be transferred to the Logic contract
 
-    constructor(address engine) ERC20("EncodeStableCoin", "EUSD") Ownable(engine) {}
-
-    function burn(uint256 _amount) public override onlyOwner {
-        super.burn(_amount);
+    function burn(address _from, uint256 _amount) external onlyOwner {
+        _burn(_from, _amount);
     }
 
-    function mint(address _to, uint256 _amount) public onlyOwner {
+    function mint(address _to, uint256 _amount) external onlyOwner {
         _mint(_to, _amount);
     }
 }

@@ -12,7 +12,6 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
  * @notice This contract handles the minting, burning, collateral management, and liquidation logic for the EncodeStableCoin (EUSD).
  */
 contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
-
     //////////////// Errors \\\\\\\\\\\\\\\\
 
     error AmountMustBeMoreThanZero();
@@ -52,6 +51,12 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
     event CollateralDeposited(address indexed user, uint256 indexed amount);
     event CollateralRedeemed(address indexed user, uint256 indexed amount);
     event UserLiquidated(address indexed user, uint256 indexed amount);
+    event FeesWithdrawn(address indexed to, uint256 feesToWithdrawn);
+    event ExtraCollateralWithdrawn(
+        address indexed to,
+        uint256 indexed amountWithdrawn,
+        uint256 indexed remainingCollateral
+    );
 
     //////////////// Modifiers \\\\\\\\\\\\\\\\
 
@@ -60,6 +65,10 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
         _;
     }
 
+    modifier notZeroAddress(address _address) {
+        if (_address == address(0)) revert ZeroAddress();
+        _;
+    }
     //////////////// Functions \\\\\\\\\\\\\\\\
 
     /**
@@ -68,8 +77,15 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
      * @param collateralTokenAddress The address of the collateral token.
      * @param priceFeedAddress The address of the price feed contract.
      */
-    constructor(address eUSDAddress, address collateralTokenAddress, address priceFeedAddress)
+    constructor(
+        address eUSDAddress,
+        address collateralTokenAddress,
+        address priceFeedAddress
+    )
         Ownable(msg.sender)
+        notZeroAddress(eUSDAddress)
+        notZeroAddress(collateralTokenAddress)
+        notZeroAddress(priceFeedAddress)
     {
         i_eUSD = EncodeStableCoin(eUSDAddress);
         i_collateralToken = IERC20(collateralTokenAddress);
@@ -85,7 +101,9 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
      * Emits a {EUSDMinted} event.
      * Reverts with `HealthFactorIsNotOk` if the health factor of the user is not sufficient.
      */
-    function mintEUSD(uint256 amount) external nonReentrant mustBeMoreThanZero(amount) {
+    function mintEUSD(
+        uint256 amount
+    ) external nonReentrant mustBeMoreThanZero(amount) {
         uint256 fee = (amount * FEE) / PRECISION;
         fee = _convertToCollateralToken(fee);
         collectedFees += fee;
@@ -93,7 +111,10 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
         totalUsersCollateral -= fee;
         i_eUSD.mint(msg.sender, amount);
         totalEUSDMinted += amount;
-        require(_checkHealthFactor(msg.sender), HealthFactorIsNotOk(msg.sender));
+        require(
+            _checkHealthFactor(msg.sender),
+            HealthFactorIsNotOk(msg.sender)
+        );
         emit EUSDMinted(msg.sender, amount);
     }
 
@@ -103,7 +124,9 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
      * @param amount The amount of EUSD to burn.
      * Emits a {eUSDBurned} event.
      */
-    function burnEUSD(uint256 amount) external nonReentrant mustBeMoreThanZero(amount) {
+    function burnEUSD(
+        uint256 amount
+    ) external nonReentrant mustBeMoreThanZero(amount) {
         eUSDMinted[msg.sender] -= amount;
         i_eUSD.burn(msg.sender, amount);
         totalEUSDMinted -= amount;
@@ -116,7 +139,9 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
      * @param amount The amount of collateral to deposit.
      * Emits a {CollateralDeposited} event.
      */
-    function addCollateral(uint256 amount) external nonReentrant mustBeMoreThanZero(amount) {
+    function addCollateral(
+        uint256 amount
+    ) external nonReentrant mustBeMoreThanZero(amount) {
         collateralDeposited[msg.sender] += amount;
         totalUsersCollateral += amount;
         i_collateralToken.safeTransferFrom(msg.sender, address(this), amount);
@@ -131,12 +156,17 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
      * Emits a {CollateralRedeemed} event.
      * Reverts with `HealthFactorIsNotOk` if the health factor is not sufficient after redemption.
      */
-    function redeemCollateral(uint256 amount) external nonReentrant mustBeMoreThanZero(amount) {
+    function redeemCollateral(
+        uint256 amount
+    ) external nonReentrant mustBeMoreThanZero(amount) {
         collateralDeposited[msg.sender] -= amount;
         totalUsersCollateral -= amount;
         i_collateralToken.safeTransfer(msg.sender, amount);
         if (eUSDMinted[msg.sender] != 0) {
-            require(_checkHealthFactor(msg.sender), HealthFactorIsNotOk(msg.sender));
+            require(
+                _checkHealthFactor(msg.sender),
+                HealthFactorIsNotOk(msg.sender)
+            );
         }
         emit CollateralRedeemed(msg.sender, amount);
     }
@@ -151,16 +181,24 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
      * Reverts with `AmountToCoverIsMoreThanTheDebt` if the amount to cover exceeds the user's debt.
      * Reverts with `HealthFactorIsNotOk` if the health factor of liquidator is not sufficient after liquidation.
      */
-    function liquidateUser(address user, uint256 amountToCover)
-        external
-        mustBeMoreThanZero(amountToCover)
-        nonReentrant
-    {
-        require(liquidationStatus(user) >= MIN_HEALTH_FACTOR, LiquidationStatusIsOk());
-        uint256 amountToCoverAllDebt = getEUSDAmountToImproveLiquidationStatus(user);
-        require(amountToCover <= amountToCoverAllDebt, AmountToCoverIsMoreThanTheDebt());
+    function liquidateUser(
+        address user,
+        uint256 amountToCover
+    ) external mustBeMoreThanZero(amountToCover) nonReentrant {
+        require(
+            liquidationStatus(user) >= MIN_HEALTH_FACTOR,
+            LiquidationStatusIsOk()
+        );
+        uint256 amountToCoverAllDebt = getEUSDAmountToImproveLiquidationStatus(
+            user
+        );
+        require(
+            amountToCover <= amountToCoverAllDebt,
+            AmountToCoverIsMoreThanTheDebt()
+        );
         uint256 debtInCollateral = _convertToCollateralToken(amountToCover);
-        uint256 amountWithBonus = debtInCollateral + ((debtInCollateral * LIQUIDATION_BONUS) / PRECISION);
+        uint256 amountWithBonus = debtInCollateral +
+            ((debtInCollateral * LIQUIDATION_BONUS) / PRECISION);
         eUSDMinted[msg.sender] -= amountToCover;
         eUSDMinted[user] -= amountToCover;
         i_eUSD.burn(msg.sender, amountToCover);
@@ -168,59 +206,103 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
         collateralDeposited[user] -= amountWithBonus;
         emit CollateralRedeemed(user, amountWithBonus);
         i_collateralToken.safeTransfer(msg.sender, amountWithBonus);
-        require(_checkHealthFactor(msg.sender), HealthFactorIsNotOk(msg.sender));
+        require(
+            _checkHealthFactor(msg.sender),
+            HealthFactorIsNotOk(msg.sender)
+        );
         emit CollateralDeposited(msg.sender, amountWithBonus);
         emit UserLiquidated(user, amountToCover);
     }
-
-    function withdrawFees(address to) external onlyOwner {
-        i_collateralToken.safeTransfer(to, collectedFees);
+    /**
+     * @notice Withdraw collected fees to a specified address.
+     * @dev Only the owner can call this function.
+     * @param to The address to send the fees to.
+     * Emits a {FeesWithdrawn} event.
+     */
+    function withdrawFees(
+        address to
+    ) external onlyOwner nonReentrant notZeroAddress(to) {
+        uint256 feesToWithdraw = collectedFees;
         collectedFees = 0;
+        i_collateralToken.safeTransfer(to, feesToWithdraw);
+        emit FeesWithdrawn(to, feesToWithdraw);
     }
 
-    function withdrawExtraCollateral(address to) external onlyOwner {
-        uint256 amount = i_collateralToken.balanceOf(address(this)) - totalUsersCollateral;
-        i_collateralToken.safeTransfer(to, amount);
+    /**
+     * @notice Withdraw extra collateral to a specified address.
+     * @dev Only the owner can call this function.
+     * @param to The address to send the extra collateral to.
+     * Emits an {ExtraCollateralWithdrawn} event.
+     */
+    function withdrawExtraCollateral(
+        address to
+    ) external onlyOwner nonReentrant notZeroAddress(to) {
+        uint256 extraCollateral = i_collateralToken.balanceOf(address(this)) -
+            totalUsersCollateral;
+        uint256 remainingCollateral = i_collateralToken.balanceOf(
+            address(this)
+        ) - extraCollateral;
+        i_collateralToken.safeTransfer(to, extraCollateral);
+        emit ExtraCollateralWithdrawn(to, extraCollateral, remainingCollateral);
     }
 
     //////////////// Internal View Functions \\\\\\\\\\\\\\\\
-    
-    function _checkHealthFactor(address user) internal view returns (bool healthFactor) {
+
+    function _checkHealthFactor(
+        address user
+    ) internal view returns (bool healthFactor) {
         healthFactor = healthFactorOfUser(user) >= MIN_HEALTH_FACTOR;
     }
 
-    function _convertToCollateralToken(uint256 amount) internal view returns (uint256 ethAmount) {
+    function _convertToCollateralToken(
+        uint256 amount
+    ) internal view returns (uint256 ethAmount) {
         uint256 ethPrice = getCollateralUSDPrice();
         ethAmount = amount / ethPrice;
     }
 
-    function _convertToUSD(uint256 amount) internal view returns (uint256 usdAmount) {
+    function _convertToUSD(
+        uint256 amount
+    ) internal view returns (uint256 usdAmount) {
         uint256 ethPrice = getCollateralUSDPrice();
         usdAmount = amount * ethPrice;
     }
 
     //////////////// Public and External View Functions \\\\\\\\\\\\\\\\
 
-    function liquidationStatus(address user) public view returns (uint256 healthFactor) {
+    function liquidationStatus(
+        address user
+    ) public view returns (uint256 healthFactor) {
         uint256 collateralInUSD = _convertToUSD(collateralDeposited[user]);
         uint256 eUSDUserBalance = eUSDMinted[user];
-        healthFactor = (collateralInUSD * PRECISION) / (eUSDUserBalance * LIQUIDATION_THRESHOLD);
+        healthFactor =
+            (collateralInUSD * PRECISION) /
+            (eUSDUserBalance * LIQUIDATION_THRESHOLD);
     }
 
-    function healthFactorOfUser(address user) public view returns (uint256 healthFactor) {
-        uint256 collateralUserBalanceInUsd = _convertToUSD(collateralDeposited[user]);
+    function healthFactorOfUser(
+        address user
+    ) public view returns (uint256 healthFactor) {
+        uint256 collateralUserBalanceInUsd = _convertToUSD(
+            collateralDeposited[user]
+        );
         uint256 eUSDUserBalance = eUSDMinted[user];
-        healthFactor = (collateralUserBalanceInUsd * PRECISION) / (eUSDUserBalance * COLLATERALIZATION_RATIO);
+        healthFactor =
+            (collateralUserBalanceInUsd * PRECISION) /
+            (eUSDUserBalance * COLLATERALIZATION_RATIO);
     }
 
     function getCollateralUSDPrice() public view returns (uint256 price) {
         // here must be fetched information from Teller
     }
 
-    function getEUSDAmountToImproveLiquidationStatus(address user) public view returns (uint256 difference) {
+    function getEUSDAmountToImproveLiquidationStatus(
+        address user
+    ) public view returns (uint256 difference) {
         uint256 collateralInUSD = _convertToUSD(collateralDeposited[user]);
         uint256 eUSDUserBalance = eUSDMinted[user];
-        uint256 eUSDUserBalanceMustHave = (collateralInUSD * PRECISION_FOR_DEBT_CALCULATIONS) / LIQUIDATION_THRESHOLD;
+        uint256 eUSDUserBalanceMustHave = (collateralInUSD *
+            PRECISION_FOR_DEBT_CALCULATIONS) / LIQUIDATION_THRESHOLD;
         difference = eUSDUserBalanceMustHave - eUSDUserBalance;
     }
 
@@ -266,6 +348,8 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
 
     function getEUSDTotalCollateralization() external view returns (uint256) {
         // used precisions to return the value in percentage
-        return (_convertToUSD(totalUsersCollateral) * PRECISION) / (totalEUSDMinted * PRECISION_FOR_DEBT_CALCULATIONS);
+        return
+            (_convertToUSD(totalUsersCollateral) * PRECISION) /
+            (totalEUSDMinted * PRECISION_FOR_DEBT_CALCULATIONS);
     }
 }

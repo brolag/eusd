@@ -12,9 +12,12 @@ import { UsingTellor } from "usingtellor/contracts/UsingTellor.sol";
  * @notice This contract handles the minting, burning, collateral management, and liquidation logic for the EncodeStableCoin (EUSD).
  */
 contract EncodeStableCoinLogic {
+    mapping(address => uint256) public collateralAmount;
+
     error AmountMustBeMoreThanZero();
     error ZeroAddress();
     error InsufficientMintedBalance(); // New error for burning more than minted 
+
 
     // State Variables
     EncodeStableCoin private immutable stableCoin; // Reference to the EncodeStableCoin contract
@@ -30,7 +33,7 @@ contract EncodeStableCoinLogic {
      * external price data, specifically the ETH/USD price.
      */
     constructor(address _stableCoin, address payable _tellorAddress) UsingTellor(_tellorAddress) {
-    stableCoin = EncodeStableCoin(_stableCoin); // Initialize stablecoin reference
+      stableCoin = EncodeStableCoin(_stableCoin); // Initialize stablecoin reference
     }
 
     /**
@@ -65,10 +68,25 @@ contract EncodeStableCoinLogic {
     }
 
     
-    function addCollateral() external  {
+    /**
+     * @dev This function is used to deposit collateral to the vault.
+     * msg.value is the amount of collateral to deposit
+     * msg.sender is the user who is depositing the collateral
+     */
+    function addCollateral() external payable {
+        collateralAmount[msg.sender] += msg.value;
     }
 
     function redeemCollateral() external {
+    }
+
+    /**
+     * @dev This function is used to check the collateral amount for a user.
+     * @param _user The address of the user to check the collateral amount for.
+     * @return The collateral amount for the user.
+     */
+    function checkCollateralOf(address _user) external view returns (uint256) {
+        return collateralAmount[_user];
     }
 
     function liquidate() external {

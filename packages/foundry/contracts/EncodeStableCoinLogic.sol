@@ -2,10 +2,10 @@
 
 pragma solidity 0.8.27;
 
-import {EncodeStableCoin} from "./EncodeStableCoin.sol";
-import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+//Import the stablecoin contract
+import { EncodeStableCoin } from "./EncodeStableCoin.sol";
+//Import the Tellor contract
+import { UsingTellor } from "usingtellor/contracts/UsingTellor.sol";
 
 /**
  * @title EncodeStableCoinLogic
@@ -169,6 +169,22 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard {
             );
         }
         emit CollateralRedeemed(msg.sender, amount);
+    }
+
+    /**
+     * @notice Fetch ETH/USD price using Tellor Oracle
+     * @return price The ETH/USD price
+     */
+    function getETHUSDPrice() public view returns (uint256 price) {
+        bytes memory _queryData = abi.encode("SpotPrice", abi.encode("eth", "usd"));
+        bytes32 _queryId = keccak256(_queryData);
+        (bytes memory _value, uint256 _timestamp) = _getDataBefore(_queryId, block.timestamp - 1 hours);
+
+        require(_timestamp > 0, "No data available");
+        require(block.timestamp - _timestamp < 1 days, "Data is stale");
+
+        price = abi.decode(_value, (uint256));
+        return price;
     }
 
     /**

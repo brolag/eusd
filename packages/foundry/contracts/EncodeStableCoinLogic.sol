@@ -20,6 +20,7 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard, UsingTellor {
     error HealthFactorIsNotOk(address user);
     error LiquidationStatusIsOk();
     error AmountToCoverIsMoreThanTheDebt();
+    error NoCollateralDeposited();
     error Teller_NoDataAvailable();
     error Teller_DataIsStale();
 
@@ -46,7 +47,7 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard, UsingTellor {
     uint256 private totalEUSDMinted; // Tracks the total amount of EUSD minted
     mapping(address => uint256) private eUSDMinted; // Tracks the amount of EUSD minted per user
     mapping(address => uint256) private collateralDeposited; // Tracks the amount of collateral deposited per user
-
+    
     //////////////// Events \\\\\\\\\\\\\\\\
 
     event EUSDMinted(address indexed user, uint256 indexed amount);
@@ -95,12 +96,14 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard, UsingTellor {
      * Reverts with `HealthFactorIsNotOk` if the health factor of the user is not sufficient.
      */
     function mintEUSD(uint256 amount) external nonReentrant mustBeMoreThanZero(amount) {
+        require(collateralDeposited[msg.sender] > 0, NoCollateralDeposited());
         uint256 fee = (amount * FEE) / PRECISION;
         fee = _convertToCollateralToken(fee);
         collectedFees += fee;
         collateralDeposited[msg.sender] -= fee;
         totalUsersCollateral -= fee;
         i_eUSD.mint(msg.sender, amount);
+        eUSDMinted[msg.sender] += amount;
         totalEUSDMinted += amount;
         require(_checkHealthFactor(msg.sender), HealthFactorIsNotOk(msg.sender));
         emit EUSDMinted(msg.sender, amount);
@@ -164,8 +167,8 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard, UsingTellor {
         external
         mustBeMoreThanZero(amountToCover)
         nonReentrant
-    {
-        require(liquidationStatus(user) >= MIN_HEALTH_FACTOR, LiquidationStatusIsOk());
+    {   
+        require(liquidationStatus(user) < MIN_HEALTH_FACTOR, LiquidationStatusIsOk());
         uint256 amountToCoverAllDebt = getEUSDAmountToImproveLiquidationStatus(user);
         require(amountToCover <= amountToCoverAllDebt, AmountToCoverIsMoreThanTheDebt());
         uint256 debtInCollateral = _convertToCollateralToken(amountToCover);
@@ -187,7 +190,6 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard, UsingTellor {
      * @param to The address to send the fees to.
      * Emits a {FeesWithdrawn} event.
      */
-
     function withdrawFees(address to) external onlyOwner nonReentrant notZeroAddress(to) {
         uint256 feesToWithdraw = collectedFees;
         collectedFees = 0;
@@ -254,16 +256,16 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard, UsingTellor {
      *      Ensures the data is not stale (within 1 day) and available (timestamp greater than 0).
      * @return price The current collateral(ETH) price in USD.
      */
-    function getCollateralUSDPrice() public view returns (uint256 price) {
+    function getCollateralUSDPrice() public view returns (uint256 price ) {
         bytes memory _queryData = abi.encode("SpotPrice", abi.encode("eth", "usd"));
         bytes32 _queryId = keccak256(_queryData);
         (bytes memory _value, uint256 _timestamp) = getDataBefore(_queryId, block.timestamp - 1 hours);
 
         require(_timestamp > 0, Teller_NoDataAvailable());
-        require(block.timestamp - _timestamp < 1 days, Teller_DataIsStale());
+        //uncomment the line below when deploying to mainnet
+        // require(block.timestamp - _timestamp < 1 days, Teller_DataIsStale());
 
         price = abi.decode(_value, (uint256));
-
     }
 
     /**
@@ -273,10 +275,11 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard, UsingTellor {
      * @return difference The amount of EUSD required to improve the liquidation status.
      */
     function getEUSDAmountToImproveLiquidationStatus(address user) public view returns (uint256 difference) {
+        require (liquidationStatus(user) < MIN_HEALTH_FACTOR, LiquidationStatusIsOk());
         uint256 collateralInUSD = _convertToUSD(collateralDeposited[user]);
         uint256 eUSDUserBalance = eUSDMinted[user];
         uint256 eUSDUserBalanceMustHave = (collateralInUSD * PRECISION_FOR_DEBT_CALCULATIONS) / LIQUIDATION_THRESHOLD;
-        difference = eUSDUserBalanceMustHave - eUSDUserBalance;
+        difference = eUSDUserBalance - eUSDUserBalanceMustHave ;
     }
 
     /**
@@ -327,5 +330,13 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard, UsingTellor {
 
     function getTotalEUSDMinted() external view returns (uint256) {
         return totalEUSDMinted;
+    }
+
+    function getUsersEUSDMinted(address user) external view returns (uint256) {
+        return eUSDMinted[user];
+    }
+
+    function getUsersCollateral(address user) external view returns (uint256) {
+        return collateralDeposited[user];
     }
 }

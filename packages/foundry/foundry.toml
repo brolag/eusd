@@ -1,7 +1,8 @@
 [profile.default]
-src = 'contracts'
+src = 'packages/foundry/contracts'
 out = 'out'
 libs = ['lib']
+test = 'packages/foundry/test' # define the test directory
 fs_permissions = [{ access = "read-write", path = "./"}]
 remappings = ['@openzeppelin/contracts=lib/openzeppelin-contracts/contracts', 'usingtellor/contracts/=lib/usingtellor/contracts']
 

@@ -169,8 +169,6 @@ contract EncodeStableCoinLogic is Ownable, ReentrancyGuard, UsingTellor {
         nonReentrant
     {   
         require(liquidationStatus(user) < MIN_HEALTH_FACTOR, LiquidationStatusIsOk());
-        uint256 amountToCoverAllDebt = getEUSDAmountToImproveLiquidationStatus(user);
-        require(amountToCover <= amountToCoverAllDebt, AmountToCoverIsMoreThanTheDebt());
         uint256 debtInCollateral = _convertToCollateralToken(amountToCover);
         uint256 amountWithBonus = debtInCollateral + ((debtInCollateral * LIQUIDATION_BONUS) / PRECISION);
         eUSDMinted[msg.sender] -= amountToCover;
